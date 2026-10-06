@@ -42,7 +42,7 @@ th{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em
 <main>
 <div class="stats" id="stats"></div>
 <div class="bar"><input id="q" type="search" placeholder="Search name, mobile, agreement no…" aria-label="Search"><select id="fl" aria-label="Filter"><option value="">All</option><option>Active</option><option>Overdue</option><option>Closed</option></select><button class="btn s" id="csv">Export CSV</button><button class="btn s" id="sy">Sync Customer Portal</button></div>
-<div class="tw"><table><thead><tr><th>Agreement</th><th>Date</th><th>Customer</th><th>Mobile</th><th>Loan ₹</th><th>EMI ₹</th><th>EMIs paid</th><th>Balance ₹</th><th>Overdue ₹</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table><div class="empty" id="em" style="display:none">No agreements yet. Click “New Agreement” to add the first one.</div></div>
+<div class="tw"><table><thead><tr><th>Agreement</th><th>Date</th><th>Customer</th><th>Mobile</th><th>Loan ₹</th><th>EMI ₹</th><th>EMIs paid</th><th>Balance ₹</th><th>Overdue ₹</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table><div class="empty" id="norows" style="display:none">No agreements yet. Click “New Agreement” to add the first one.</div></div>
 <p id="note" style="color:var(--mut);font-size:12px"></p>
 </main>
 
@@ -93,20 +93,21 @@ function render(){
  $("stats").innerHTML=[["Total agreements",rows.length],["Active loans",a.length],["Loan given (active)",inr(sum)],["Collected so far",inr(col)],["Balance to collect",inr(bal)],["Overdue EMI amount",inr(od)],["Overdue customers",odc],["Gold held (net g)",gw.toFixed(2)]].map(([k,v])=>`<div class="st"><small>${k}</small><div>${v}</div></div>`).join("");
  const q=$("q").value.toLowerCase(),fl=$("fl").value;
  const v=rows.filter(r=>(!fl||status(r)===fl)&&(!q||[r.name,r.mobile,r.no].join(" ").toLowerCase().includes(q)));
- $("em").style.display=rows.length?"none":"block";
+ $("norows").style.display=rows.length?"none":"block";
  $("tb").innerHTML=v.map(r=>{const s=status(r),e=es(r),h=e.L.length>0,k=esc(r.no);return`<tr><td>${k}</td><td>${fd(r.date)}</td><td>${esc(r.name)}</td><td>${esc(r.mobile)}</td><td>${inr(r.loan)}</td><td>${r.emi?inr(r.emi):"-"}</td><td>${h?e.cnt+" / "+e.L.length:"-"}</td><td>${h?inr(e.bal):"-"}</td><td style="color:var(--red)">${e.od?inr(e.od)+" ("+e.odn+")":"-"}</td><td><span class="tag ${s==="Closed"?"c":s==="Overdue"?"o":""}">${s}</span></td><td><button class="btn sm" data-p="${k}">EMI</button> <button class="btn s sm" data-v="${k}">View</button> <button class="btn s sm" data-t="${k}">${r.status==="Closed"?"Reopen":"Close"}</button> <button class="btn r sm" data-d="${k}">Delete</button></td></tr>`}).join("");
 }
 const view=r=>({name:r.name,no:r.no,date:r.date,loan:r.loan,interest:r.interest,period:r.period,payable:r.payable,emi:r.emi||0,due:r.due||"",items:r.items||"",net:r.net||0,purity:r.purity||"",status:r.status||"Active",emis:r.emis||[]});
 const pv=r=>firebase.database().ref("customerView/"+r.no+"/"+r.mobile).set(view(r));
-const put=async r=>{await ref.child(r.no).set(r);await pv(r)},del=async no=>{await ref.child(no).remove();await firebase.database().ref("customerView/"+no).remove()};
-let started=false;
+const tmo=(p,ms)=>Promise.race([p,new Promise((_,j)=>setTimeout(()=>j(new Error("No response from the database. Check the databaseURL in the config, your internet, and that the Realtime Database is created.")),ms))]);
+const put=async r=>{await tmo(ref.child(r.no).set(r),12000);try{await tmo(pv(r),12000)}catch(e){$("note").textContent="Saved, but the customer portal was not updated ("+(e.message||e)+"). Publish the latest Firebase rules."}},del=async no=>{await ref.child(no).remove();await firebase.database().ref("customerView/"+no).remove()};
+let started=false,live=false;
 function start(){
  if(FIREBASE_CONFIG.apiKey==="YOUR_API_KEY"){$("lerr").textContent="Firebase is not configured yet. Paste your config in the file.";return}
  firebase.initializeApp(FIREBASE_CONFIG);const au=firebase.auth();
  au.onAuthStateChanged(u=>{
   $("lov").classList.toggle("on",!u);
-  if(u&&!started){started=true;ref=firebase.database().ref("agreements");
-   ref.on("value",s=>{rows=Object.values(s.val()||{});render();$("note").textContent="Live: changes sync instantly across all office devices."},e=>{$("note").textContent="Database error: "+e.message})}
+  if(u&&!started){started=true;ref=firebase.database().ref("agreements");setTimeout(()=>{if(!live)$("note").textContent="Not connected to the database. Check the databaseURL in the config (Firebase Console > Realtime Database > Data shows the right URL), the Rules, and your internet."},8000);
+   ref.on("value",s=>{live=true;rows=Object.values(s.val()||{});render();$("note").textContent="Live: changes sync instantly across all office devices."},e=>{$("note").textContent="Database error: "+e.message})}
   if(!u&&ref){ref.off();ref=null;started=false;rows=[];render()}});
  $("lf").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";$("lb").disabled=true;
   try{await au.signInWithEmailAndPassword($("le").value.trim(),$("lpw").value)}catch(x){$("lerr").textContent="Login failed: check email / password."}$("lb").disabled=false};
